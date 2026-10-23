@@ -5,7 +5,7 @@
 @property (nonatomic,readonly) NSURL *dataContainerURL;
 @end
 
-@interface AppInfo : NSObject
+@interface RHMInstalledAppInfo : NSObject
 @property (nonatomic, strong) NSString *infoPlistPath;
 
 @property (nonatomic, readonly) NSString* bundleIdentifier;

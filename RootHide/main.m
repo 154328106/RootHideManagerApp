@@ -31,14 +31,14 @@ int spawn(const char* path, const char** argv, const char** envp, void(^std_out)
     posix_spawn_file_actions_t action;
     posix_spawn_file_actions_init(&action);
 
-    int outPipe[2];
-    pipe(outPipe);
+    int outPipe[2] = {0};
+    assert(pipe(outPipe) == 0);
     posix_spawn_file_actions_addclose(&action, outPipe[0]);
     posix_spawn_file_actions_adddup2(&action, outPipe[1], STDOUT_FILENO);
     posix_spawn_file_actions_addclose(&action, outPipe[1]);
     
-    int errPipe[2];
-    pipe(errPipe);
+    int errPipe[2] = {0};
+    assert(pipe(errPipe) == 0);
     posix_spawn_file_actions_addclose(&action, errPipe[0]);
     posix_spawn_file_actions_adddup2(&action, errPipe[1], STDERR_FILENO);
     posix_spawn_file_actions_addclose(&action, errPipe[1]);
@@ -253,7 +253,7 @@ void killAllForBundle(const char* bundlePath)
     free(info);
 }
 
-NSString* RootUserClearAppData(AppInfo* app) {
+NSString* RootUserClearAppData(RHMInstalledAppInfo* app) {
     NSString* error=nil;
     NSString* result=nil;
     int ret = spawnRoot(NSBundle.mainBundle.executablePath, @[@"clearAppData", app.bundleIdentifier], &result, &error);
@@ -288,20 +288,64 @@ BOOL RootUserGetDirectoryContents(NSString* path, NSString* cacheFile)
     return YES;
 }
 
-int main(int argc, char * argv[]) {
-    
-    //Keyboard Preference & Localized won't work
-//    assert(setuid(0) == 0);
-//    assert(getuid() == 0);
-//    assert(setgid(0) == 0);
-//    assert(getgid() == 0);
-    
-    NSLog(@"uid=%d euid=%d gid=%d egid=%d issetugid=%d", getuid(), geteuid(), getgid(), getegid(), issetugid());
+BOOL RootUserRemountPreboot(void)
+{
+    NSString* error=nil;
+    NSString* result=nil;
+    int ret = spawnRoot(NSBundle.mainBundle.executablePath, @[@"remountPreboot"], &result, &error);
+    if(ret != 0) {
+        NSLog(@"remountPreboot failed: %@", error);
+        return NO;
+    }
+    return YES;
+}
+
+static int getsvugid(uid_t* svuid, gid_t* svgid)
+{
+    uid_t uid = -1;
+    gid_t gid = -1;
+    struct kinfo_proc kinfo;
+    u_int miblen = 4;
+    size_t  len;
+    int mib[miblen];
+    int ret;
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROC;
+    mib[2] = KERN_PROC_PID;
+    mib[3] = getpid();
+    len = sizeof(struct kinfo_proc);
+    ret = sysctl(mib, miblen, &kinfo, &len, NULL, 0);
+    if (ret != 0) {
+        uid = -1;
+    } else {
+        uid = kinfo.kp_eproc.e_pcred.p_svuid;
+        gid = kinfo.kp_eproc.e_pcred.p_svgid;
+    }
+    if(svuid) *svuid = uid;
+    if(svgid) *svgid = gid;
+    return 0;
+}
+uid_t getsvuid() {
+    uid_t uid = -1;
+    getsvugid(&uid, NULL);
+    return uid;
+}
+gid_t getsvgid(void) {
+    gid_t gid = -1;
+    getsvugid(NULL, &gid);
+    return gid;
+}
+
+int main(int argc, char * argv[])
+{
+    NSLog(@"uid=%d euid=%d svuid=%d gid=%d egid=%d svgid=%d issetugid=%d", getuid(), geteuid(), getsvuid(), getgid(), getegid(), getsvgid(), issetugid());
     
     if(argc >= 2)
     {
         if(argc==3 && strcmp(argv[1], "removeItemAtPath")==0) {
-            NSError* err;
+            assert(geteuid()==0 && getegid()==0);
+        
+            NSError* err=nil;
             if(![NSFileManager.defaultManager removeItemAtPath:@(argv[2]) error:&err]) {
                 fprintf(stderr, "%s", err.description.UTF8String);
                 return -1;
@@ -309,6 +353,8 @@ int main(int argc, char * argv[]) {
             return 0;
         }
         if(argc==4 && strcmp(argv[1], "getDirectoryContents")==0) {
+            assert(geteuid()==0 && getegid()==0);
+        
             NSArray* GetDirectoryContents(NSString* path);
             NSArray* contents = GetDirectoryContents(@(argv[2]));
             if(!contents) {
@@ -320,12 +366,26 @@ int main(int argc, char * argv[]) {
             return 0;
         }
         if(argc==3 && strcmp(argv[1], "clearAppData")==0) {
-            AppInfo* app = [AppInfo appWithBundleIdentifier:@(argv[2])];
-            NSString* clearAppData(AppInfo* app);
+            assert(geteuid()==0 && getegid()==0);
+        
+            RHMInstalledAppInfo* app = [RHMInstalledAppInfo appWithBundleIdentifier:@(argv[2])];
+            NSString* clearAppData(RHMInstalledAppInfo* app);
             NSString* error = clearAppData(app);
             if(error) {
                 fprintf(stderr, "%s", error.UTF8String);
                 return -1;
+            }
+            return 0;
+        }
+        if(argc==2 && strcmp(argv[1], "remountPreboot")==0) {
+            assert(geteuid()==0 && getegid()==0);
+        
+            pid_t pid=0;
+            char* args[] = {"/sbin/mount", "-u", "-w", "/private/preboot", NULL};
+            posix_spawn(&pid, args[0], NULL, NULL, args, NULL);
+            if(pid > 0) {
+                int status=0;
+                waitpid(pid, &status, 0);
             }
             return 0;
         }

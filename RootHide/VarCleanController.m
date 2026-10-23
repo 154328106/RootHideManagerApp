@@ -2,6 +2,9 @@
 #include "AppDelegate.h"
 #import "ZFCheckbox.h"
 
+// Read and written only on the main thread, by both refresh and clean.
+static BOOL tableDataBusy = NO;
+
 @interface varCleanController ()
 @property (nonatomic, retain) NSMutableArray* tableData;
 @end
@@ -39,14 +42,14 @@
     [refreshControl addTarget:self action:@selector(manualRefresh) forControlEvents:UIControlEventValueChanged];
     self.tableView.refreshControl = refreshControl;
     
-    
-    self.tableData = [self updateData:NO];
+    [self startRefresh:NO];
     
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(autoRefresh)
                                           name:UIApplicationWillEnterForegroundNotification object:nil];
 }
 
 - (void)batchSelect {
+    if(tableDataBusy) return;
     int selected = 0;
     for(NSDictionary* group in self.tableData) {
         for(NSMutableDictionary* item in group[@"items"]) {
@@ -67,6 +70,8 @@
 }
 
 - (void)startRefresh:(BOOL)keepState {
+    if(tableDataBusy) return;
+    tableDataBusy = YES;
     [self.tableView.refreshControl beginRefreshing];
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         NSMutableArray* newData = [self updateData:keepState];
@@ -74,6 +79,7 @@
             self.tableData = newData;
             [self.tableView reloadData];
             [self.tableView.refreshControl endRefreshing];
+            tableDataBusy = NO;
         });
     });
 }
@@ -88,6 +94,7 @@
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    if(tableDataBusy) return;
     [self.tableView.refreshControl beginRefreshing];
     [self.tableView.refreshControl endRefreshing];
 }
@@ -112,8 +119,64 @@ NSArray* GetDirectoryContents(NSString* path)
     return result;
 }
 
-- (void)updateForRules:(NSDictionary*)rules customed:(NSMutableDictionary*)customedRules newData:(NSMutableArray*)newData keepState:(BOOL)keepState {
-    for (NSString* path in rules) {
+- (BOOL)validateRules:(NSDictionary*)rules
+{
+    if(![rules isKindOfClass:NSDictionary.class])
+        return NO;
+
+    for (NSString* path in rules)
+    {
+        if(![path isKindOfClass:NSString.class])
+            return NO;
+
+        NSDictionary* rule = rules[path];
+        if(![rule isKindOfClass:NSDictionary.class])
+            return NO;
+
+        NSString* defaultMode = rule[@"default"];
+        if(defaultMode && ![@[@"whitelist", @"blacklist"] containsObject:defaultMode])
+            return NO;
+
+        for (NSString* key in @[@"whitelist", @"blacklist"])
+        {
+            NSArray* list = rule[key];
+            if(!list) continue;
+
+            if(![list isKindOfClass:NSArray.class])
+                return NO;
+
+            for (id item in list)
+            {
+                if([item isKindOfClass:NSString.class])
+                    continue;
+                    
+                if(![item isKindOfClass:NSDictionary.class])
+                    return NO;
+
+                NSString* name = item[@"name"];
+                NSString* match = item[@"match"];
+
+                if(![name isKindOfClass:NSString.class] || ![match isKindOfClass:NSString.class])
+                    return NO;
+
+                if([match isEqualToString:@"include"])
+                    continue;
+
+                if(![match isEqualToString:@"regexp"])
+                    return NO;
+
+                if(![NSRegularExpression regularExpressionWithPattern:name options:0 error:nil])
+                    return NO;
+            }
+        }
+    }
+    return YES;
+}
+
+- (void)updateForRules:(NSDictionary*)rules customed:(NSMutableDictionary*)customedRules newData:(NSMutableArray*)newData keepState:(BOOL)keepState
+{
+    for (NSString* path in rules)
+    {
         NSMutableArray *folders = [[NSMutableArray alloc] init];
         NSMutableArray *files = [[NSMutableArray alloc] init];
         
@@ -127,6 +190,7 @@ NSArray* GetDirectoryContents(NSString* path)
         {
             if(geteuid()!=0 || getegid()!=0)
             {
+                NSLog(@"try RootUserGetDirectoryContents: %@", path);
                 NSString* cacheFile = jbroot(@"/tmp/.dircontentscache");
                 BOOL RootUserGetDirectoryContents(NSString*, NSString*);
                 BOOL ret = RootUserGetDirectoryContents(path, cacheFile);
@@ -257,7 +321,8 @@ NSArray* GetDirectoryContents(NSString* path)
     }
 }
 
-- (NSMutableArray*)updateData:(BOOL)keepState {
+- (NSMutableArray*)updateData:(BOOL)keepState
+{
     NSLog(@"updateData...");
     NSMutableArray* newData = [[NSMutableArray alloc] init];
     
@@ -266,6 +331,8 @@ NSArray* GetDirectoryContents(NSString* path)
     
     NSString *customedRulesFilePath = jbroot(@"/var/mobile/Library/RootHide/varCleanRules-custom.plist");
     NSMutableDictionary *customedRules = [NSMutableDictionary dictionaryWithContentsOfFile:customedRulesFilePath];
+
+    if(![self validateRules:customedRules]) customedRules = nil;
     
     [self updateForRules:rules customed:customedRules newData:newData keepState:keepState];
     //continue processing the remaining paths that are not in the built-in list
@@ -283,7 +350,8 @@ NSArray* GetDirectoryContents(NSString* path)
     return newData;
 }
 
-- (BOOL)checkFileInList:(NSString *)fileName List:(NSArray*)list {
+- (BOOL)checkFileInList:(NSString *)fileName List:(NSArray*)list
+{
     for (NSObject* item in list) {
         if([item isKindOfClass:NSString.class]) {
             if ([fileName isEqualToString:(NSString*)item]) {
@@ -308,78 +376,102 @@ NSArray* GetDirectoryContents(NSString* path)
     return NO;
 }
 
-- (void)varClean {
-    NSLog(@"self.tableData=%@", self.tableData);
+- (void)varClean
+{
+    if(tableDataBusy) return;
+
+    UIAlertController* alert = [UIAlertController alertControllerWithTitle:Localized(@"Cleaning up...") message:@"" preferredStyle:UIAlertControllerStyleAlert];
+
+    alert.modalInPresentation = YES;
     
-    [self.tableView.refreshControl beginRefreshing];
-    
-    for(NSDictionary* group in [self.tableData copy]) {
-        for(NSDictionary* item in [group[@"items"] copy])
-        {
-            if(![item[@"checked"] boolValue]) continue;
-            
-            NSLog(@"clean=%@", item);
-            
-            /*
-            NSString* backup = jbroot(@"/var/mobile/Library/RootHide/backup");
-            NSString* newpath = [backup stringByAppendingPathComponent:item[@"path"]];
-            NSString* dirpath = [newpath stringByDeletingLastPathComponent];
-            NSLog(@"newpath=%@, dirpath=%@", newpath, dirpath);
-            if(![NSFileManager.defaultManager fileExistsAtPath:dirpath])
-                [NSFileManager.defaultManager createDirectoryAtPath:dirpath
-                                        withIntermediateDirectories:YES attributes:nil error:nil];
-            [NSFileManager.defaultManager copyItemAtPath:item[@"path"] toPath:newpath error:nil];
-            //*/
-            
-//            NSDirectoryEnumerator<NSString*>* enumerator = [NSFileManager.defaultManager enumeratorAtPath:item[@"path"]];
-//            if(enumerator) for(NSString* subpath in enumerator)
-//            {
-//                NSError* err;
-//                if(![NSFileManager.defaultManager removeItemAtPath:[item[@"path"] stringByAppendingPathComponent:subpath] error:&err]) {
-//                    NSLog(@"clean failed=%@", err);
-//                }
-//            }
-            
-            NSError* err;
-            if(![NSFileManager.defaultManager removeItemAtPath:item[@"path"] error:&err]) {
-                NSLog(@"clean failed: %@", err);
-                
-                if(geteuid()!=0 || getegid()!=0) {
-                    NSLog(@"try RootUserRemoveItemAtPath: %@", item[@"path"]);
-                    BOOL RootUserRemoveItemAtPath(NSString* path);
-                    BOOL __ret = RootUserRemoveItemAtPath(item[@"path"]);
-                }
-                
-                continue;
-            }
-            
-            NSIndexPath* indexPath = [NSIndexPath indexPathForRow:[group[@"items"] indexOfObject:item]
-                                                        inSection:[self.tableData indexOfObject:group] ];
-            
-            [group[@"items"] removeObject:item]; //delete source data first
-            
-            NSLog(@"indexPath=%@", indexPath);
-            [self.tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationLeft];
+    [self presentViewController:alert animated:YES completion:^{
+
+        if(tableDataBusy) {
+            [alert dismissViewControllerAnimated:YES completion:nil];
+            return;
         }
-    }
-    
-    [self.tableView.refreshControl endRefreshing];
-    
-    self.tableData = [self updateData:NO];
-    [self.tableView reloadData];
+
+        tableDataBusy = YES;
+        
+        NSLog(@"self.tableData=%@", self.tableData);
+        
+        NSArray* sourceData = [self.tableData copy];
+        
+        UIRefreshControl* refreshControl = self.tableView.refreshControl;
+        [refreshControl beginRefreshing];
+
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^
+        {
+            for(NSDictionary* group in sourceData)
+            {
+                for(NSDictionary* item in [group[@"items"] copy])
+                {
+                    if(![item[@"checked"] boolValue]) continue;
+                    
+                    NSLog(@"cleaning %@", item);
+                    
+                    @autoreleasepool
+                    {
+                        NSError* error = nil;
+                        if(![NSFileManager.defaultManager removeItemAtPath:item[@"path"] error:&error])
+                        {
+                            NSLog(@"clean failed: %@", error);
+                            if(geteuid()!=0 || getegid()!=0) {
+                                BOOL RootUserRemoveItemAtPath(NSString* path);
+                                if(!RootUserRemoveItemAtPath(item[@"path"])) {
+                                    NSLog(@"RootUserRemoveItemAtPath fail: %@", item[@"path"]);
+                                    continue;
+                                }
+                            } else {
+                                continue;
+                            }
+                        }
+
+                        // The worker waits while the main thread changes the shared model.
+                        dispatch_sync(dispatch_get_main_queue(), ^
+                        {
+                            NSIndexPath* indexPath = [NSIndexPath indexPathForRow:[group[@"items"] indexOfObjectIdenticalTo:item]
+                                                                      inSection:[self.tableData indexOfObjectIdenticalTo:group]];
+                            
+                            [group[@"items"] removeObject:item]; //delete source data first
+                            
+                            NSLog(@"indexPath=%@", indexPath);
+                            [self.tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationLeft];
+                        });
+                    }
+                }
+            }
+
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                alert.title = Localized(@"Rescanning files...");
+                [refreshControl endRefreshing];
+            });
+
+            @autoreleasepool {
+                NSMutableArray* newData = [self updateData:NO];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    self.tableData = newData;
+                    [self.tableView reloadData];
+                    [alert dismissViewControllerAnimated:YES completion:^{
+                        tableDataBusy = NO;
+                    }];
+                });
+            }
+        });
+    }];
 }
 
 #pragma mark - Table view data source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    NSLog(@"numberOfRowsInSection=%ld", self.tableData.count);
+    // NSLog(@"numberOfRowsInSection=%ld", self.tableData.count);
     return self.tableData.count;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     NSDictionary *groupData = self.tableData[section];
     NSArray *items = groupData[@"items"];
-    NSLog(@"numberOfRowsInSection=%ld %ld", (long)section, items.count);
+    // NSLog(@"numberOfRowsInSection=%ld %ld", (long)section, items.count);
     return items.count;
 }
 
@@ -404,7 +496,7 @@ NSArray* GetDirectoryContents(NSString* path)
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    NSLog(@"cellForRowAtIndexPath=%@", indexPath);
+    // NSLog(@"cellForRowAtIndexPath=%@", indexPath);
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"Cell"];
     
     NSDictionary *groupData = self.tableData[indexPath.section];
@@ -451,6 +543,7 @@ NSArray* GetDirectoryContents(NSString* path)
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];//
+    if(tableDataBusy) return;
     
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     ZFCheckbox *checkbox = (ZFCheckbox*)cell.accessoryView;

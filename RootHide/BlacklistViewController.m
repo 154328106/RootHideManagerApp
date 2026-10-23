@@ -61,7 +61,7 @@ BOOL isDefaultInstallationPath(NSString* path)
         isFiltered = true;
         filteredApps = [[NSMutableArray alloc] init];
         searchText = searchText.lowercaseString;
-        for (AppInfo* app in appsArray) {
+        for (RHMInstalledAppInfo* app in appsArray) {
             NSRange nameRange = [app.name.lowercaseString rangeOfString:searchText options:NSCaseInsensitiveSearch];
             NSRange bundleIdRange = [app.bundleIdentifier.lowercaseString rangeOfString:searchText options:NSCaseInsensitiveSearch];
             if(nameRange.location != NSNotFound || bundleIdRange.location != NSNotFound) {
@@ -145,7 +145,7 @@ BOOL isDefaultInstallationPath(NSString* path)
     {
         NSMutableDictionary* appconfig = [AppDelegate getDefaultsForKey:@"appconfig"];
         
-        result = [applications sortedArrayUsingComparator:^NSComparisonResult(AppInfo *app1, AppInfo *app2) {
+        result = [applications sortedArrayUsingComparator:^NSComparisonResult(RHMInstalledAppInfo*app1, RHMInstalledAppInfo*app2) {
 
             BOOL enabled1 = [[appconfig objectForKey:app1.bundleIdentifier] boolValue];
             BOOL enabled2 = [[appconfig objectForKey:app2.bundleIdentifier] boolValue];
@@ -164,9 +164,9 @@ BOOL isDefaultInstallationPath(NSString* path)
     else
     {
         NSMutableArray *newapps = [NSMutableArray array];
-        [applications enumerateObjectsUsingBlock:^(AppInfo *newobj, NSUInteger idx, BOOL * _Nonnull stop) {
+        [applications enumerateObjectsUsingBlock:^(RHMInstalledAppInfo*newobj, NSUInteger idx, BOOL * _Nonnull stop) {
             __block BOOL hasBeenContained = NO;
-            [self->appsArray enumerateObjectsUsingBlock:^(AppInfo *obj, NSUInteger idx, BOOL * _Nonnull stop) {
+            [self->appsArray enumerateObjectsUsingBlock:^(RHMInstalledAppInfo*obj, NSUInteger idx, BOOL * _Nonnull stop) {
                 if ([obj.bundleIdentifier isEqualToString:newobj.bundleIdentifier]) {
                     hasBeenContained = YES;
                     *stop = YES;
@@ -178,8 +178,8 @@ BOOL isDefaultInstallationPath(NSString* path)
         }];
         
         NSMutableArray *tmpArray = [NSMutableArray array];
-        [self->appsArray enumerateObjectsUsingBlock:^(AppInfo *obj, NSUInteger idx, BOOL * _Nonnull stop) {
-            [applications enumerateObjectsUsingBlock:^(AppInfo *newobj, NSUInteger idx, BOOL * _Nonnull stop) {
+        [self->appsArray enumerateObjectsUsingBlock:^(RHMInstalledAppInfo*obj, NSUInteger idx, BOOL * _Nonnull stop) {
+            [applications enumerateObjectsUsingBlock:^(RHMInstalledAppInfo*newobj, NSUInteger idx, BOOL * _Nonnull stop) {
                 if ([obj.bundleIdentifier isEqualToString:newobj.bundleIdentifier]) {
                     [tmpArray addObject:newobj];
                     *stop = YES;
@@ -199,7 +199,7 @@ BOOL isDefaultInstallationPath(NSString* path)
     NSArray* allInstalledApplications = [LSApplicationWorkspace.defaultWorkspace allInstalledApplications];
     for(id proxy in allInstalledApplications)
     {
-        AppInfo* app = [AppInfo appWithPrivateProxy:proxy];
+        RHMInstalledAppInfo* app = [RHMInstalledAppInfo appWithPrivateProxy:proxy];
         //if(!app.isHiddenApp && ([app.applicationType containsString:@"User"]))
         //some apps can be installed in trollstore but detect jailbreak
         if(!app.isHiddenApp
@@ -249,7 +249,7 @@ BOOL isDefaultInstallationPath(NSString* path)
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"Cell"];
     
-    AppInfo* app = isFiltered? filteredApps[indexPath.row] : appsArray[indexPath.row];
+    RHMInstalledAppInfo* app = isFiltered? filteredApps[indexPath.row] : appsArray[indexPath.row];
     
     UIImage *image = app.icon;
     cell.imageView.image = [self imageWithImage:image scaledToSize:CGSizeMake(40, 40)];
@@ -286,7 +286,7 @@ BOOL isDefaultInstallationPath(NSString* path)
         long tag = recognizer.view.tag;
         NSIndexPath* indexPath = [NSIndexPath indexPathForRow:tag&0xFFFFFFFF inSection:tag>>32];
         
-        AppInfo* app = isFiltered? filteredApps[indexPath.row] : appsArray[indexPath.row];
+        RHMInstalledAppInfo* app = isFiltered? filteredApps[indexPath.row] : appsArray[indexPath.row];
         
         UIAlertController* appMenuAlert = [UIAlertController alertControllerWithTitle:app.name?:@"" message:app.bundleIdentifier?:@"" preferredStyle:UIAlertControllerStyleActionSheet];
         
@@ -297,10 +297,10 @@ BOOL isDefaultInstallationPath(NSString* path)
             
             NSString* error = nil;
             if(geteuid()==0 && getegid()==0) {
-                NSString* clearAppData(AppInfo* app);
+                NSString* clearAppData(RHMInstalledAppInfo* app);
                 error = clearAppData(app);
             } else {
-                NSString* RootUserClearAppData(AppInfo* app);
+                NSString* RootUserClearAppData(RHMInstalledAppInfo* app);
                 error = RootUserClearAppData(app);
             }
             if(error) {
@@ -331,7 +331,7 @@ BOOL isDefaultInstallationPath(NSString* path)
     CGPoint pos = [switchInCell convertPoint:switchInCell.bounds.origin toView:self.tableView];
     NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:pos];
     
-    AppInfo* app = isFiltered? filteredApps[indexPath.row] : appsArray[indexPath.row];
+    RHMInstalledAppInfo* app = isFiltered? filteredApps[indexPath.row] : appsArray[indexPath.row];
     
     if(blacklistDisabled)
     {

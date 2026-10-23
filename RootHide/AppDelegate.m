@@ -104,7 +104,9 @@
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     // Override point for customization after application launch.
     
-    NSLog(@"didFinishLaunchingWithOptions uid=%d euid=%d gid=%d egid=%d issetugid=%d", getuid(), geteuid(), getgid(), getegid(), issetugid());
+    extern uid_t getsvuid(void);
+    extern gid_t getsvgid(void);
+    NSLog(@"application:didFinishLaunchingWithOptions uid=%d euid=%d svuid=%d gid=%d egid=%d svgid=%d issetugid=%d", getuid(), geteuid(), getsvuid(), getgid(), getegid(), getsvgid(), issetugid());
     
     NSString* roothideDir = jbroot(@"/var/mobile/Library/RootHide");
     if(![NSFileManager.defaultManager fileExistsAtPath:roothideDir]) {
@@ -139,9 +141,9 @@
         assert([template writeToFile:customedRulesFilePath atomically:YES]);
     }
     
-    self.window = UIWindow.alloc.init;
-    self.window.backgroundColor = [UIColor clearColor];
-    [self.window makeKeyAndVisible];
+    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    // Match the system launch screen background in light and dark appearances.
+    self.window.backgroundColor = [UIColor systemBackgroundColor];
     
     BlacklistViewController *listController = [BlacklistViewController sharedInstance];
     varCleanController *cleanController = [varCleanController sharedInstance];
@@ -157,8 +159,6 @@
     UINavigationController *cleanNavigationController = [[UINavigationController alloc] initWithRootViewController:cleanController];
     UINavigationController *setNavigationController = [[UINavigationController alloc] initWithRootViewController:setController];
     
-
-    
     UITabBarController *tabBarController = [[UITabBarController alloc] init];
     tabBarController.viewControllers = @[listNavigationController, cleanNavigationController, setNavigationController];
     
@@ -166,6 +166,7 @@
     //tabBarController.tabBar.scrollEdgeAppearance = [UITabBarAppearance new];
     
     self.window.rootViewController = tabBarController;
+    [self.window makeKeyAndVisible];
     
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -223,13 +224,8 @@
             
             [AppDelegate showDetectionWarning:[NSString stringWithFormat:@"%@:\n\n%@\n\n(%@)",Localized(@"Legacy rootless jailbreak(s)"), [items componentsJoinedByString:@"\n\n"], Localized(@"*WARNING*: Don't touch any other files in /private/preboot/, otherwise it will cause bootloop")]];
             
-            pid_t pid=0;
-            char* args[] = {"/sbin/mount", "-u", "-w", "/private/preboot", NULL};
-            posix_spawn(&pid, args[0], NULL, NULL, args, NULL);
-            if(pid > 0) {
-                int status=0;
-                waitpid(pid, &status, 0);
-            }
+            BOOL RootUserRemountPreboot(void);
+            RootUserRemountPreboot();
         }
     }
     else

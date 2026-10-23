@@ -46,7 +46,7 @@
 @end
 
 
-@implementation AppInfo
+@implementation RHMInstalledAppInfo
 {
     PrivateApi_LSApplicationProxy* _applicationProxy;
     UIImage* _icon;
@@ -54,22 +54,6 @@
 
 - (NSString*)name
 {
-    NSString *languageCode = [[NSLocale preferredLanguages] firstObject];
-    NSRange range = [languageCode rangeOfString:@"-" options:NSBackwardsSearch];
-    if (range.location != NSNotFound) {
-        languageCode = [languageCode substringToIndex:range.location];
-    }
-    
-    NSString *infoPlistPath = [_applicationProxy.bundleURL.path stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.lproj/InfoPlist.strings", languageCode]];
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if ([fileManager fileExistsAtPath:infoPlistPath]) {
-        NSDictionary *plistDict = [[NSDictionary alloc] initWithContentsOfFile:infoPlistPath];
-        NSString* displayName = [plistDict objectForKey:@"CFBundleDisplayName"];
-        if (displayName) {
-            return displayName;
-        }
-    }
-    
     return _applicationProxy.localizedName ?: _applicationProxy.localizedShortName;
 }
 

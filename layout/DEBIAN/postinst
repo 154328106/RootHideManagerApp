@@ -1,5 +1,6 @@
 #!/bin/sh
 
 uicache -p /Applications/RootHide.app
-chown 0:0 /Applications/RootHide.app/RootHide
-chmod +s /Applications/RootHide.app/RootHide
+killall -9 RootHide 2>/dev/null || true
+chmod -R 0755 /var/mobile/Library/RootHide || true
+chown -R 501:501 /var/mobile/Library/RootHide || true
