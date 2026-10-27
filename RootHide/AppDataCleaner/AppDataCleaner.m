@@ -9,7 +9,7 @@
 
 BOOL isUUIDPathOf(NSString* path, NSString* parent);
 
-NSString* clearAppData(AppInfo* app)
+NSString* clearAppData(RHMInstalledAppInfo* app)
 {
     NSString* error = nil;
     NSLog(@"app.containerURL=%@", app.containerURL);
