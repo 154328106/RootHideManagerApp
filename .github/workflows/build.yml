@@ -1,0 +1,79 @@
+name: Build RootHide Manager (roothide deb)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - roothide-manager-custom
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 40
+    env:
+      THEOS: ${{ github.workspace }}/theos
+      SDK_VERSION: "16.5"
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          brew install ldid make dpkg
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Set up roothide Theos
+        run: |
+          set -euo pipefail
+          git clone --recursive https://github.com/roothide/theos.git "$THEOS"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+
+      - name: Install iOS SDK
+        run: |
+          set -euo pipefail
+          mkdir -p "$THEOS/sdks"
+          git clone -n --depth=1 --filter=tree:0 https://github.com/theos/sdks.git "$RUNNER_TEMP/sdks"
+          cd "$RUNNER_TEMP/sdks"
+          git sparse-checkout set --no-cone "iPhoneOS${SDK_VERSION}.sdk"
+          git checkout
+          cp -r "iPhoneOS${SDK_VERSION}.sdk" "$THEOS/sdks/"
+          ls -la "$THEOS/sdks"
+
+      - name: Verify roothide scheme is present
+        run: |
+          set -euo pipefail
+          test -f "$THEOS/vendor/mod/roothide/package/deb.mk"
+          test -f "$THEOS/vendor/include/roothide.h"
+          test -f "$THEOS/vendor/lib/iphone/roothide/libroothide.tbd"
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos clang --version || true
+          make --version | head -1
+          git -C "$THEOS" rev-parse HEAD
+
+      - name: Build deb
+        run: |
+          set -euo pipefail
+          make clean
+          make package FINALPACKAGE=1
+          echo "--- produced packages ---"
+          find packages -maxdepth 1 -name "*.deb" -print
+          shasum -a 256 packages/*.deb
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: roothide-manager-deb-${{ github.run_number }}
+          path: packages/*.deb
+          if-no-files-found: error
+          retention-days: 30
