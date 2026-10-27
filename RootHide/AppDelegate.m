@@ -320,12 +320,6 @@
         close(s);
     });
     
-    NSDictionary *proxySettings = (__bridge NSDictionary *)(CFNetworkCopySystemProxySettings());
-    NSNumber* vpn = proxySettings[(NSString *)kCFNetworkProxiesHTTPEnable];
-    if(vpn && vpn.boolValue) {
-        [AppDelegate showDetectionWarning:Localized(@"Some apps may refuse to run because a VPN/Proxy is enabled.")];
-    }
-    
     return YES;
 }
 @end
